@@ -4,7 +4,7 @@ Core media downloader service.
 """
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable, Optional
 
 import yt_dlp
 
@@ -20,7 +20,10 @@ class DownloaderService:
 
     def __init__(self) -> None:
         self.download_dir = Path(settings.temp_download_dir)
-        self.download_dir.mkdir(parents=True, exist_ok=True)
+        self.download_dir.mkdir(
+            parents=True,
+            exist_ok=True,
+        )
 
     # -----------------------------------------------------
     # MEDIA INFORMATION
@@ -40,7 +43,10 @@ class DownloaderService:
 
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(
+                    url,
+                    download=False,
+                )
 
             if not info:
                 raise DownloaderError(
@@ -75,18 +81,27 @@ class DownloaderService:
         url: str,
         download_type: str = "video",
         quality: str = "best",
+        progress_callback: Optional[
+            Callable[[dict[str, Any]], None]
+        ] = None,
     ) -> Path:
         """
         Download media in video or audio mode.
+
+        progress_callback receives yt-dlp progress updates.
         """
 
-        if download_type not in {"video", "audio"}:
+        if download_type not in {
+            "video",
+            "audio",
+        }:
             raise DownloaderError(
                 "Download type must be 'video' or 'audio'."
             )
 
         output_template = str(
-            self.download_dir / "%(id)s_%(title)s.%(ext)s"
+            self.download_dir /
+            "%(id)s_%(title)s.%(ext)s"
         )
 
         options = {
@@ -99,13 +114,24 @@ class DownloaderService:
         }
 
         # -------------------------------------------------
+        # PROGRESS HOOK
+        # -------------------------------------------------
+
+        if progress_callback is not None:
+            options["progress_hooks"] = [
+                progress_callback
+            ]
+
+        # -------------------------------------------------
         # VIDEO
         # -------------------------------------------------
 
         if download_type == "video":
             options.update(
                 {
-                    "format": self._video_format(quality),
+                    "format": self._video_format(
+                        quality
+                    ),
                     "merge_output_format": "mp4",
                 }
             )
@@ -130,19 +156,17 @@ class DownloaderService:
 
         try:
             with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=True)
+
+                info = ydl.extract_info(
+                    url,
+                    download=True,
+                )
 
                 if not info:
                     raise DownloaderError(
                         "Download returned no media information."
                     )
 
-                requested_downloads = info.get(
-                    "requested_downloads"
-                ) or []
-
-                # yt-dlp may merge multiple streams into one
-                # final file, so inspect the output directory.
                 files = self._find_downloaded_files(
                     info.get("id")
                 )
@@ -150,6 +174,20 @@ class DownloaderService:
                 if not files:
                     raise DownloaderError(
                         "The media file could not be located."
+                    )
+
+                # Send a final 100% update.
+                if progress_callback is not None:
+                    self._send_progress(
+                        progress_callback,
+                        {
+                            "status": "finished",
+                            "progress": 100.0,
+                            "downloaded_bytes": None,
+                            "total_bytes": None,
+                            "speed": None,
+                            "eta": 0,
+                        },
                     )
 
                 return files[-1]
@@ -163,11 +201,41 @@ class DownloaderService:
             ) from exc
 
     # -----------------------------------------------------
+    # PROGRESS
+    # -----------------------------------------------------
+
+    @staticmethod
+    def _send_progress(
+        callback: Callable[
+            [dict[str, Any]],
+            None,
+        ],
+        data: dict[str, Any],
+    ) -> None:
+        """
+        Safely send progress information.
+
+        A progress callback must never be allowed to
+        break the actual download.
+        """
+
+        try:
+            callback(data)
+
+        except Exception:
+            # Progress reporting is secondary.
+            # Never fail a download because the UI
+            # progress system encounters an error.
+            pass
+
+    # -----------------------------------------------------
     # FORMAT SELECTION
     # -----------------------------------------------------
 
     @staticmethod
-    def _video_format(quality: str) -> str:
+    def _video_format(
+        quality: str,
+    ) -> str:
         """
         Select the highest appropriate video quality.
         """
@@ -214,22 +282,56 @@ class DownloaderService:
 
         formats = []
 
-        for media_format in info.get("formats", []):
+        for media_format in info.get(
+            "formats",
+            [],
+        ):
             formats.append(
                 {
-                    "format_id": media_format.get("format_id"),
-                    "ext": media_format.get("ext"),
-                    "resolution": media_format.get(
-                        "resolution"
-                    ),
-                    "width": media_format.get("width"),
-                    "height": media_format.get("height"),
-                    "fps": media_format.get("fps"),
-                    "filesize": media_format.get(
-                        "filesize"
-                    ),
-                    "vcodec": media_format.get("vcodec"),
-                    "acodec": media_format.get("acodec"),
+                    "format_id":
+                        media_format.get(
+                            "format_id"
+                        ),
+
+                    "ext":
+                        media_format.get(
+                            "ext"
+                        ),
+
+                    "resolution":
+                        media_format.get(
+                            "resolution"
+                        ),
+
+                    "width":
+                        media_format.get(
+                            "width"
+                        ),
+
+                    "height":
+                        media_format.get(
+                            "height"
+                        ),
+
+                    "fps":
+                        media_format.get(
+                            "fps"
+                        ),
+
+                    "filesize":
+                        media_format.get(
+                            "filesize"
+                        ),
+
+                    "vcodec":
+                        media_format.get(
+                            "vcodec"
+                        ),
+
+                    "acodec":
+                        media_format.get(
+                            "acodec"
+                        ),
                 }
             )
 
@@ -253,15 +355,19 @@ class DownloaderService:
         files = []
 
         for path in self.download_dir.iterdir():
+
             if not path.is_file():
                 continue
 
-            if path.name.startswith(f"{media_id}_"):
+            if path.name.startswith(
+                f"{media_id}_"
+            ):
                 files.append(path)
 
         return sorted(
             files,
-            key=lambda path: path.stat().st_mtime,
+            key=lambda path:
+                path.stat().st_mtime,
         )
 
 

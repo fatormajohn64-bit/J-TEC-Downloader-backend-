@@ -1,0 +1,44 @@
+"""
+J TEC Downloader
+Temporary download cleanup utilities.
+"""
+
+import time
+from pathlib import Path
+
+from app.config import settings
+
+
+def cleanup_old_downloads() -> int:
+    """
+    Remove temporary files older than the configured lifetime.
+
+    Returns:
+        Number of files removed.
+    """
+
+    download_dir = Path(settings.temp_download_dir)
+
+    if not download_dir.exists():
+        return 0
+
+    now = time.time()
+    removed = 0
+
+    for file_path in download_dir.iterdir():
+        if not file_path.is_file():
+            continue
+
+        try:
+            age = now - file_path.stat().st_mtime
+
+            if age > settings.cleanup_after_seconds:
+                file_path.unlink()
+                removed += 1
+
+        except (FileNotFoundError, PermissionError, OSError):
+            # Another process may have removed the file already,
+            # or the file may temporarily be inaccessible.
+            continue
+
+    return removed

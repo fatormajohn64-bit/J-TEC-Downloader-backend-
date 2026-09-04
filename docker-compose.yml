@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  j-tec-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: j-tec-downloader
+    ports:
+      - "8000:8000"
+    environment:
+      - TEMP_DIR=/app/temp_downloads
+    volumes:
+      - temp_data:/app/temp_downloads
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  temp_data:
+  

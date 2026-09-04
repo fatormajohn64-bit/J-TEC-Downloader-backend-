@@ -14,6 +14,7 @@ from app.services.downloader import (
     DownloaderError,
     downloader_service,
 )
+from app.utils.cleanup import cleanup_all_downloads
 
 
 router = APIRouter()
@@ -69,6 +70,9 @@ def download_media(
 ):
     """
     Download the requested media and return the file.
+
+    After FastAPI finishes sending the file, all temporary
+    downloaded files are removed.
     """
 
     if request.type not in {"video", "audio"}:
@@ -104,10 +108,10 @@ def download_media(
 
     media_type = _get_media_type(file_path)
 
-    # Remove the temporary file after it has been sent.
+    # Delete all temporary files AFTER the response
+    # has finished sending the downloaded file.
     background_tasks.add_task(
-        _delete_file,
-        file_path,
+        cleanup_all_downloads
     )
 
     return FileResponse(
@@ -140,15 +144,3 @@ def _get_media_type(file_path: Path) -> str:
         extension,
         "application/octet-stream",
     )
-
-
-def _delete_file(file_path: Path) -> None:
-    """
-    Safely remove a temporary downloaded file.
-    """
-
-    try:
-        if file_path.exists():
-            file_path.unlink()
-    except (FileNotFoundError, PermissionError, OSError):
-        pass

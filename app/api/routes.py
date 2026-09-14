@@ -40,6 +40,9 @@ class DownloadRequest(BaseModel):
     quality: Optional[str] = "best"
 
 
+DOWNLOAD_TYPES = {"video", "audio", "image"}
+
+
 # =========================================================
 # HEALTH
 # =========================================================
@@ -98,10 +101,10 @@ def start_download(request: DownloadRequest):
     can use to monitor progress.
     """
 
-    if request.type not in {"video", "audio"}:
+    if request.type not in DOWNLOAD_TYPES:
         raise HTTPException(
             status_code=400,
-            detail="Download type must be 'video' or 'audio'.",
+            detail="Download type must be 'video', 'audio', or 'image'.",
         )
 
     job_id = uuid.uuid4().hex
@@ -386,6 +389,12 @@ def _get_media_type(
         ".aac": "audio/aac",
         ".wav": "audio/wav",
         ".ogg": "audio/ogg",
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".webp": "image/webp",
+        ".heic": "image/heic",
+        ".zip": "application/zip",
     }
 
     return media_types.get(

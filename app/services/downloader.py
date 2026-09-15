@@ -41,7 +41,9 @@ class DownloaderService:
 
     def get_info(self, url: str) -> dict[str, Any]:
         """
-        Retrieve metadata and available media information.
+        Retrieve just enough metadata to show a preview --
+        title, thumbnail, duration. One extraction call only,
+        no format list, no second lookup.
         """
 
         options = {
@@ -49,6 +51,7 @@ class DownloaderService:
             "no_warnings": True,
             "skip_download": True,
             "noplaylist": True,
+            "socket_timeout": 12,
         }
 
         try:
@@ -63,8 +66,6 @@ class DownloaderService:
                     "No media information was returned."
                 )
 
-            image_count = self._count_images(url)
-
             return {
                 "id": info.get("id"),
                 "title": info.get("title"),
@@ -72,12 +73,6 @@ class DownloaderService:
                 "duration": info.get("duration"),
                 "thumbnail": info.get("thumbnail"),
                 "webpage_url": info.get("webpage_url"),
-                "extractor": info.get("extractor_key"),
-                "formats": self._get_formats(info),
-                # Lets the frontend decide whether to offer an
-                # "Image" download option for this specific link.
-                "is_image_post": image_count > 0,
-                "image_count": image_count,
             }
 
         except DownloaderError:
@@ -85,51 +80,8 @@ class DownloaderService:
 
         except Exception as exc:
             raise DownloaderError(
-                f"Unable to retrieve media information: {exc}"
+                self._friendly_error(exc)
             ) from exc
-
-    def _count_images(self, url: str) -> int:
-        """
-        Best-effort check for how many downloadable images a
-        post contains (e.g. an Instagram carousel). Never raises;
-        an unknown/zero count just means the "image" option may
-        not apply to this link.
-        """
-
-        options = {
-            "quiet": True,
-            "no_warnings": True,
-            "skip_download": True,
-            # Multi-photo posts (Instagram carousels, TikTok photo
-            # posts) are represented by yt-dlp as a small playlist
-            # of image entries, so this must stay False here to see
-            # all of them -- unlike the main info/download options,
-            # which keep noplaylist True to avoid pulling in real
-            # video playlists.
-            "noplaylist": False,
-            "extract_flat": True,
-        }
-
-        try:
-            with yt_dlp.YoutubeDL(options) as ydl:
-                info = ydl.extract_info(url, download=False)
-        except Exception:
-            return 0
-
-        if not info:
-            return 0
-
-        entries = info.get("entries")
-
-        if entries:
-            return len(list(entries))
-
-        ext = str(info.get("ext") or "").lower()
-
-        if f".{ext}" in IMAGE_EXTENSIONS:
-            return 1
-
-        return 0
 
     # -----------------------------------------------------
     # DOWNLOAD
@@ -170,6 +122,13 @@ class DownloaderService:
             "outtmpl": output_template,
             "restrictfilenames": True,
             "continuedl": True,
+            # Speed: pull multiple video/audio fragments at once
+            # instead of one at a time, and fail fast instead of
+            # hanging on a slow/unresponsive host.
+            "concurrent_fragment_downloads": 4,
+            "socket_timeout": 15,
+            "retries": 3,
+            "fragment_retries": 3,
         }
 
         # -------------------------------------------------
@@ -285,8 +244,84 @@ class DownloaderService:
 
         except Exception as exc:
             raise DownloaderError(
-                f"Media download failed: {exc}"
+                self._friendly_error(exc)
             ) from exc
+
+    # -----------------------------------------------------
+    # FRIENDLY ERROR MESSAGES
+    # -----------------------------------------------------
+
+    @staticmethod
+    def _friendly_error(exc: Exception) -> str:
+        """
+        Turn yt-dlp's raw (often technical) error text into one
+        plain sentence the user can actually understand.
+        """
+
+        message = str(exc).lower()
+
+        privacy_markers = (
+            "private",
+            "login",
+            "log in",
+            "sign in",
+            "cookies",
+            "authentication",
+            "age-restricted",
+            "age restricted",
+            "permission",
+            "subscriber",
+            "followers",
+        )
+
+        removed_markers = (
+            "unavailable",
+            "not available",
+            "removed",
+            "does not exist",
+            "not found",
+            "deleted",
+            "no longer",
+        )
+
+        geo_markers = (
+            "geo",
+            "not available in your country",
+            "blocked in",
+            "region",
+        )
+
+        unsupported_markers = (
+            "unsupported url",
+            "no extractor",
+            "unable to extract",
+        )
+
+        if any(marker in message for marker in privacy_markers):
+            return (
+                "This content is private or restricted, "
+                "so it can't be downloaded."
+            )
+
+        if any(marker in message for marker in removed_markers):
+            return (
+                "This content is unavailable -- it may "
+                "have been deleted or taken down."
+            )
+
+        if any(marker in message for marker in geo_markers):
+            return (
+                "This content isn't available in the "
+                "server's region."
+            )
+
+        if any(marker in message for marker in unsupported_markers):
+            return "This link isn't from a supported site."
+
+        return (
+            "Unable to download this media. Please check "
+            "the link and try again."
+        )
 
     # -----------------------------------------------------
     # IMAGE DOWNLOAD FINALIZATION
@@ -444,76 +479,6 @@ class DownloaderService:
             quality,
             quality_map["best"],
         )
-
-    # -----------------------------------------------------
-    # FORMAT INFORMATION
-    # -----------------------------------------------------
-
-    @staticmethod
-    def _get_formats(
-        info: dict[str, Any],
-    ) -> list[dict[str, Any]]:
-        """
-        Return useful available formats without exposing
-        unnecessary yt-dlp internals to the API.
-        """
-
-        formats = []
-
-        for media_format in info.get(
-            "formats",
-            [],
-        ):
-            formats.append(
-                {
-                    "format_id":
-                        media_format.get(
-                            "format_id"
-                        ),
-
-                    "ext":
-                        media_format.get(
-                            "ext"
-                        ),
-
-                    "resolution":
-                        media_format.get(
-                            "resolution"
-                        ),
-
-                    "width":
-                        media_format.get(
-                            "width"
-                        ),
-
-                    "height":
-                        media_format.get(
-                            "height"
-                        ),
-
-                    "fps":
-                        media_format.get(
-                            "fps"
-                        ),
-
-                    "filesize":
-                        media_format.get(
-                            "filesize"
-                        ),
-
-                    "vcodec":
-                        media_format.get(
-                            "vcodec"
-                        ),
-
-                    "acodec":
-                        media_format.get(
-                            "acodec"
-                        ),
-                }
-            )
-
-        return formats
 
     # -----------------------------------------------------
     # FILE DISCOVERY

@@ -42,6 +42,15 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY app ./app
 
+# yt-dlp fixes site-breakage (TikTok, IG, etc.) constantly --
+# far more often than this repo's other dependencies. This
+# step is placed AFTER "COPY app ./app" on purpose: Docker
+# invalidates every layer below a change, so on any deploy
+# where app code actually changed, this re-runs and installs
+# whatever is truly latest on PyPI -- instead of silently
+# reusing a stale cached yt-dlp for months.
+RUN pip install --no-cache-dir --upgrade yt-dlp
+
 # Create temporary download directory
 RUN mkdir -p temp_downloads
 

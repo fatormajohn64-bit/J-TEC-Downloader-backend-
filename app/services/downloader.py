@@ -291,10 +291,23 @@ class DownloaderService:
             "region",
         )
 
+        # A genuinely wrong/unknown link -- no extractor even
+        # matched the URL. This really does mean "not supported."
         unsupported_markers = (
             "unsupported url",
-            "no extractor",
+        )
+
+        # The URL WAS recognized (e.g. as a TikTok link), but the
+        # site itself changed something and broke extraction --
+        # this is a very different situation from "not supported"
+        # and is usually temporary (these sites change constantly;
+        # yt-dlp gets patched for it regularly).
+        site_changed_markers = (
             "unable to extract",
+            "no extractor",
+            "unable to download webpage",
+            "http error 403",
+            "http error 429",
         )
 
         if any(marker in message for marker in privacy_markers):
@@ -313,6 +326,13 @@ class DownloaderService:
             return (
                 "This content isn't available in the "
                 "server's region."
+            )
+
+        if any(marker in message for marker in site_changed_markers):
+            return (
+                "This site changed something on its end and "
+                "downloads from it are temporarily broken. "
+                "Try again later or try a different link."
             )
 
         if any(marker in message for marker in unsupported_markers):

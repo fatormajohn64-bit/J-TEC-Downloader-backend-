@@ -52,6 +52,17 @@ class DownloaderService:
             "skip_download": True,
             "noplaylist": True,
             "socket_timeout": 12,
+            # YouTube challenges requests from cloud/datacenter IPs
+            # (like Render) far more than home connections. Asking
+            # for the Android client first often avoids that check
+            # for public videos. Not a guaranteed fix -- YouTube
+            # changes this often -- but worth it as a first line
+            # of defense before reaching for cookies.
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "web"],
+                }
+            },
         }
 
         try:
@@ -129,6 +140,11 @@ class DownloaderService:
             "socket_timeout": 15,
             "retries": 3,
             "fragment_retries": 3,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": ["android", "web"],
+                }
+            },
         }
 
         # -------------------------------------------------
@@ -260,6 +276,18 @@ class DownloaderService:
 
         message = str(exc).lower()
 
+        # YouTube specifically challenges requests coming from
+        # cloud/datacenter server IPs (like Render's) far more
+        # than home connections -- this is a block on the SERVER,
+        # not a statement about the specific video. Must be
+        # checked before the general privacy markers below, since
+        # this message also contains "sign in".
+        bot_check_markers = (
+            "not a bot",
+            "confirm you",
+            "sign in to confirm",
+        )
+
         privacy_markers = (
             "private",
             "login",
@@ -309,6 +337,14 @@ class DownloaderService:
             "http error 403",
             "http error 429",
         )
+
+        if any(marker in message for marker in bot_check_markers):
+            return (
+                "The server is being asked to verify it's not a "
+                "bot for this one -- that's a block on the server "
+                "itself, not this specific video. Try again in a "
+                "bit, or try a different link to compare."
+            )
 
         if any(marker in message for marker in privacy_markers):
             return (
